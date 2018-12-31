@@ -58,17 +58,13 @@ class Bot:
                              )
 
     def remove_user(self, user_id: str):
-        print(user_dialogues[user_id])
         self.sandwich_api.close_dialogue(user_dialogues[user_id])
         user_dialogues.pop(user_id, None)
 
     def _get_user_dialogue(self, user_id: str) -> UUID:
         try:
-            print("XD")
-            print(user_dialogues)
             return user_dialogues[user_id]
         except KeyError:
-            print("XDD")
             open_response = self.sandwich_api.open_dialogue()
             user_dialogues[user_id] = open_response.uuid
             return open_response.uuid
