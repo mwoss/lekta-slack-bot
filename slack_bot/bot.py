@@ -1,70 +1,74 @@
-import os
+from os import environ
+from uuid import UUID
 
 from slackclient import SlackClient
 
-# To remember which teams have authorized your app and what tokens are
-# associated with each team, we can store this information in memory on
-# as a global object. When your bot is out of development, it's best to
-# save this in a more persistant memory store.
+from slack_bot.lekta.sandwich_api import SandwichAPI
+
+# To remember which teams have authorized your app and which user open dialogue
+# we can store this information in memory on as a global object. (for clarity it's only for development environment)
+# In production it's best to save this in a more persistant memory store.
 authed_teams = {}
+user_dialogues = {}
 
 
 class Bot:
-    name = "lektabot"
-    emoji = ":robot_face:"
+    name = 'lektabot'
+    emoji = ':robot_face:'
 
     def __init__(self):
-        self.oauth = {"client_id": os.environ.get("CLIENT_ID"),
-                      "client_secret": os.environ.get("CLIENT_SECRET"),
-                      "scope": "bot"}
-        self.verification = os.environ.get("VERIFICATION_TOKEN")
-        self.client = SlackClient("")
+        self.oauth = {'client_id': environ.get('CLIENT_ID'),
+                      'client_secret': environ.get('CLIENT_SECRET'),
+                      'scope': 'bot'}
+        self.verification = environ.get('VERIFICATION_TOKEN')
+        self.client = SlackClient(environ.get('BOT_OAUTH_TOKEN'))
+        self.sandwich_api = SandwichAPI()
 
     def auth(self, code: str):
         auth_response = self.client.api_call(
-            "oauth.access",
-            client_id=self.oauth["client_id"],
-            client_secret=self.oauth["client_secret"],
+            'oauth.access',
+            client_id=self.oauth['client_id'],
+            client_secret=self.oauth['client_secret'],
             code=code
         )
-        team_id = auth_response["team_id"]
-        authed_teams[team_id] = {"bot_token": auth_response["bot"]["bot_access_token"]}
+        team_id = auth_response['team_id']
+        authed_teams[team_id] = {'bot_token': auth_response['bot']['bot_access_token']}
         self.client = SlackClient(authed_teams[team_id]["bot_token"])
 
-    def onboarding_message(self, team_id: str, user_id: str):
-        text = "Welcome to Slack! We're so glad you're here.\n" \
-               "Get started by completing the steps below."
-        channel = self._open_dm(user_id)
+    def welcome_user(self, channel: str, user_id: str):
+        open_response = self.sandwich_api.open_dialogue()
+        user_dialogues[user_id] = open_response.uuid
+
         self.client.api_call("chat.postMessage",
                              channel=channel,
+                             text=f"Welcome to this channel <@{user_id}>! We're so glad you're here.",
                              username=self.name,
-                             icon_emoji=self.emoji,
-                             text=text,
+                             icon_emoji=self.emoji
                              )
 
-    def answer(self, team_id, user_id):
-        completed_attachments = {"text": ":white_check_mark: "
-                                         "~*Share this Message*~ "
-                                         ":mailbox_with_mail:",
-                                 "color": "#439FE0"}
-        # Grab the message object we want to update by team id and user id
-        message_obj = self.messages[team_id].get(user_id)
-        # Update the message's attachments by switching in incomplete
-        # attachment with the completed one above.
-        message_obj.share_attachment.update(completed_attachments)
-        # Update the message in Slack
-        post_message = self.client.api_call("chat.update",
-                                            channel=message_obj.channel,
-                                            ts=message_obj.timestamp,
-                                            text=message_obj.text,
-                                            attachments=message_obj.attachments
-                                            )
-        # Update the timestamp saved on the message object
-        message_obj.timestamp = post_message["ts"]
+    def answer(self, channel: str, user_id: str, text: str):
+        clear_text = text.split(' ', 1)[1]
+        dialogue_response = self.sandwich_api.make_dialogue(self._get_user_dialogue(user_id),
+                                                            clear_text)
+        self.client.api_call("chat.postMessage",
+                             channel=channel,
+                             text=f"<@{user_id}> {dialogue_response.answer}",
+                             username=self.name,
+                             icon_emoji=self.emoji
+                             )
 
-    def leave_message(self):
-        pass
+    def remove_user(self, user_id: str):
+        print(user_dialogues[user_id])
+        self.sandwich_api.close_dialogue(user_dialogues[user_id])
+        user_dialogues.pop(user_id, None)
 
-    def _open_dm(self, user_id: str):
-        new_dm = self.client.api_call("im.open", user=user_id)
-        return new_dm["channel"]["id"]
+    def _get_user_dialogue(self, user_id: str) -> UUID:
+        try:
+            print("XD")
+            print(user_dialogues)
+            return user_dialogues[user_id]
+        except KeyError:
+            print("XDD")
+            open_response = self.sandwich_api.open_dialogue()
+            user_dialogues[user_id] = open_response.uuid
+            return open_response.uuid
